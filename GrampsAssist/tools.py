@@ -886,6 +886,92 @@ def register_gramps_tools(dbstate, uistate):
 # ---------------------------------------------------------------------------
 
 
+@register_tool
+def search_wikipedia(query: str) -> str:
+    """
+    Search Wikipedia for articles matching a query and return summaries.
+
+    Useful for looking up historical context, places, surnames, events,
+    and general genealogical background information.
+    query: The search terms (e.g. 'Ellis Island immigration history').
+    """
+    import html as _html
+    import urllib.parse
+    import urllib.request
+
+    # Step 1: find matching page titles
+    search_params = urllib.parse.urlencode({
+        "action": "query",
+        "list": "search",
+        "srsearch": query,
+        "srlimit": 3,
+        "utf8": 1,
+        "format": "json",
+    })
+    search_url = "https://en.wikipedia.org/w/api.php?" + search_params
+    req = urllib.request.Request(
+        search_url, headers={"User-Agent": "GrampsAssist/1.0 (genealogy research tool)"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        return f"Wikipedia search failed: {exc}"
+
+    import json as _json
+    try:
+        search_data = _json.loads(data)
+    except Exception:
+        return "Wikipedia search returned unparseable data."
+
+    hits = search_data.get("query", {}).get("search", [])
+    if not hits:
+        return f"No Wikipedia articles found for '{query}'."
+
+    titles = [h["title"] for h in hits]
+
+    # Step 2: fetch intro extracts for those titles
+    extract_params = urllib.parse.urlencode({
+        "action": "query",
+        "prop": "extracts",
+        "exintro": True,
+        "explaintext": True,
+        "exsentences": 3,
+        "titles": "|".join(titles),
+        "utf8": 1,
+        "format": "json",
+    })
+    extract_url = "https://en.wikipedia.org/w/api.php?" + extract_params
+    req2 = urllib.request.Request(
+        extract_url, headers={"User-Agent": "GrampsAssist/1.0 (genealogy research tool)"}
+    )
+    try:
+        with urllib.request.urlopen(req2, timeout=15) as resp2:
+            ext_data = _json.loads(resp2.read().decode("utf-8", errors="replace"))
+    except Exception as exc:
+        return f"Wikipedia extract fetch failed: {exc}"
+
+    pages = ext_data.get("query", {}).get("pages", {})
+    # Build title → extract map
+    extract_map = {
+        page["title"]: page.get("extract", "").strip()
+        for page in pages.values()
+    }
+
+    lines = []
+    for title in titles:
+        url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_"))
+        extract = extract_map.get(title, "")
+        if len(extract) > 300:
+            extract = extract[:297] + "..."
+        entry = f"{title}\n  {url}"
+        if extract:
+            entry += f"\n  {extract}"
+        lines.append(entry)
+
+    return f"Wikipedia results for '{query}':\n\n" + "\n\n".join(lines)
+
+
 # @register_tool
 # def search_gramps_wiki(query: str, max_results: int = 5) -> str:
 #     """
