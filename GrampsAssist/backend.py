@@ -292,7 +292,7 @@ class OpenAICompatibleBackend(ChatBackend):
         try:
             self._do_stream(messages, tools, on_chunk, on_tool_call, on_done, on_error, trace)
         except Exception as exc:
-            _LOG.exception("OpenAI backend stream error")
+            _LOG.debug("OpenAI backend stream error", exc_info=True)
             on_error(exc)
 
     def _do_stream(self, messages, tools, on_chunk, on_tool_call, on_done, on_error, _trace=None):
@@ -342,7 +342,11 @@ class OpenAICompatibleBackend(ChatBackend):
 
             if response.status != 200:
                 raw = response.read().decode("utf-8", errors="replace")
-                raise RuntimeError(f"HTTP {response.status}: {raw[:500]}")
+                try:
+                    msg = json.loads(raw).get("error", {}).get("message") or raw[:500]
+                except Exception:
+                    msg = raw[:500]
+                raise RuntimeError(msg)
 
             tool_call_accum = {}  # index → {"id","name","arguments"}
             finish_reason = None
@@ -389,6 +393,23 @@ class OpenAICompatibleBackend(ChatBackend):
                     break
         finally:
             conn.close()
+
+        # Fallback: some smaller models emit the tool call as plain-text JSON
+        # e.g. {"function":"get_main_person"} instead of using tool_calls.
+        if not tool_call_accum and _response_parts and tools:
+            plain = "".join(_response_parts).strip()
+            try:
+                obj = json.loads(plain)
+                if isinstance(obj, dict) and "function" in obj:
+                    tool_call_accum[0] = {
+                        "id": "plain-0",
+                        "name": obj["function"],
+                        "arguments": json.dumps(obj.get("arguments") or obj.get("parameters") or {}),
+                    }
+                    finish_reason = "tool_calls"
+                    _response_parts.clear()
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         if finish_reason == "tool_calls" and tool_call_accum:
             if span:
@@ -577,7 +598,7 @@ class AnthropicBackend(ChatBackend):
         try:
             self._do_stream(messages, tools, on_chunk, on_tool_call, on_done, on_error, trace)
         except Exception as exc:
-            _LOG.exception("Anthropic backend stream error")
+            _LOG.debug("Anthropic backend stream error", exc_info=True)
             on_error(exc)
 
     def _do_stream(self, messages, tools, on_chunk, on_tool_call, on_done, on_error, _trace=None):
@@ -631,7 +652,11 @@ class AnthropicBackend(ChatBackend):
 
             if response.status != 200:
                 raw = response.read().decode("utf-8", errors="replace")
-                raise RuntimeError(f"HTTP {response.status}: {raw[:500]}")
+                try:
+                    msg = json.loads(raw).get("error", {}).get("message") or raw[:500]
+                except Exception:
+                    msg = raw[:500]
+                raise RuntimeError(msg)
 
             # Accumulate tool-use blocks indexed by content-block index
             # Each entry: {"id","name","partial_json"}
