@@ -88,6 +88,7 @@ class Tool:
     description: str
     func: Callable
     parameters: Dict  # JSON Schema {"type":"object","properties":{...},"required":[...]}
+    tags: set = field(default_factory=set)  # e.g. {"always"}, {"people"}, {"families"}
 
     # ------------------------------------------------------------------
     # Schema serialisation
@@ -183,36 +184,63 @@ class Tool:
 tool_registry: List[Tool] = []
 
 
-def register_tool(func_or_tool):
+def register_tool(func_or_tool=None, *, tags=None):
     """
     Decorator or direct call to add a tool to the global registry.
 
-    Returns the original callable unchanged so the function can still be
-    called directly::
+    Can be used as a plain decorator or with keyword arguments::
 
         @register_tool
         def search(q: str) -> str:
             ...
 
-        result = search("Smith")   # still works
+        @register_tool(tags={"always"})
+        def search_wikipedia(query: str) -> str:
+            ...
+
+        result = search("Smith")   # still works as a normal function
     """
-    if isinstance(func_or_tool, Tool):
-        tool_registry.append(func_or_tool)
-        return func_or_tool
-    tool = Tool.from_function(func_or_tool)
-    tool_registry.append(tool)
-    return func_or_tool
+    def _register(func, tag_set):
+        if isinstance(func, Tool):
+            tool_registry.append(func)
+            return func
+        tool = Tool.from_function(func)
+        if tag_set:
+            tool.tags = set(tag_set)
+        tool_registry.append(tool)
+        return func
+
+    if func_or_tool is None:
+        # Called as @register_tool(tags=...) — return a decorator
+        def decorator(func):
+            return _register(func, tags)
+        return decorator
+
+    # Called as @register_tool (no parentheses) or register_tool(func)
+    return _register(func_or_tool, tags)
 
 
-def get_tools_schema(backend_type: str = "openai") -> List[Dict]:
+def get_tools_schema(backend_type: str = "openai", tags=None) -> List[Dict]:
     """
     Return a list of tool dicts formatted for the given backend.
 
     *backend_type* is ``"openai"`` (default) or ``"anthropic"``.
+
+    If *tags* is provided (a set of strings), only tools whose tags
+    intersect with it are returned, plus tools tagged ``"always"`` and
+    untagged tools (for backward compatibility with user-registered tools).
+    If *tags* is None, all tools are returned.
     """
+    if tags is None:
+        tools = tool_registry
+    else:
+        tools = [
+            t for t in tool_registry
+            if not t.tags or "always" in t.tags or bool(t.tags & tags)
+        ]
     if backend_type == "anthropic":
-        return [t.to_anthropic_schema() for t in tool_registry]
-    return [t.to_openai_schema() for t in tool_registry]
+        return [t.to_anthropic_schema() for t in tools]
+    return [t.to_openai_schema() for t in tools]
 
 
 def call_tool(name: str, args: Dict) -> str:
@@ -869,6 +897,26 @@ def register_gramps_tools(dbstate, uistate):
 
         return {"total": total, "page": page_number, "total_pages": total_pages, "items": items}
 
+    _tool_tags = {
+        "get_active_person":    {"always"},
+        "get_view_results":     {"always"},
+        "switch_to_view":       {"always"},
+        "get_person_details":   {"people"},
+        "set_active_person":    {"people"},
+        "edit_active_person":   {"people"},
+        "filter_people":        {"people"},
+        "filter_families":      {"families"},
+        "filter_events":        {"events"},
+        "filter_places":        {"places"},
+        "filter_sources":       {"sources"},
+        "filter_citations":     {"sources"},
+        "filter_media":         {"media"},
+        "filter_repositories":  {"repositories"},
+        "filter_notes":         {"notes"},
+        "search_in_view":       {"people", "families", "events", "places",
+                                 "sources", "media", "repositories", "notes"},
+    }
+
     for func in [get_person_details, get_active_person, set_active_person,
                  get_view_results,
                  switch_to_view, search_in_view,
@@ -877,7 +925,9 @@ def register_gramps_tools(dbstate, uistate):
                  filter_repositories, filter_notes,
                  edit_active_person]:
         if func.__name__ not in existing_names:
-            register_tool(func)
+            tool = Tool.from_function(func)
+            tool.tags = _tool_tags.get(func.__name__, set())
+            tool_registry.append(tool)
             _LOG.debug("Registered Gramps tool: %s", func.__name__)
 
 
@@ -886,7 +936,7 @@ def register_gramps_tools(dbstate, uistate):
 # ---------------------------------------------------------------------------
 
 
-@register_tool
+@register_tool(tags={"always"})
 def search_wikipedia(query: str) -> str:
     """
     Search Wikipedia for articles matching a query and return summaries.

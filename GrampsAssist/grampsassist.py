@@ -53,6 +53,7 @@ _cfg.register(
       "Use the available tools to look up information when needed."),
 )
 _cfg.register("chat.include_context", True)
+_cfg.register("chat.simplify_tools", False)
 try:
     _cfg.load()
 except Exception:
@@ -725,7 +726,7 @@ class GrampsAssist(BaseAssistPanel):
         self._input_view.set_sensitive(False)
 
         # Start streaming in background
-        tools_schema = get_tools_schema(_cfg.get("backend.type")) if tool_registry else []
+        tools_schema = self._select_tools(text)
         self._backend.stream_chat(
             messages=send_messages,
             tools=tools_schema,
@@ -890,6 +891,85 @@ class GrampsAssist(BaseAssistPanel):
                 self._current_context = ""
         except Exception:
             self._current_context = ""
+
+    # ------------------------------------------------------------------
+    # Tool selection
+    # ------------------------------------------------------------------
+
+    _TOOL_KEYWORDS = {
+        "people":       ["person", "people", "who", "name", "birth", "death",
+                         "individual", "ancestor", "descendant", "relative"],
+        "families":     ["family", "families", "father", "mother", "child",
+                         "children", "spouse", "married", "marriage", "husband",
+                         "wife", "parent", "sibling", "brother", "sister"],
+        "events":       ["event", "events", "when", "date", "census", "baptism",
+                         "burial", "immigration", "graduation", "occupation"],
+        "places":       ["place", "places", "where", "location", "city", "town",
+                         "county", "country", "state", "village", "address"],
+        "sources":      ["source", "sources", "citation", "citations", "record",
+                         "document", "reference", "archive", "book", "page"],
+        "media":        ["photo", "photograph", "image", "picture", "media",
+                         "file", "scan", "document", "attachment"],
+        "repositories": ["repository", "repositories", "archive", "library",
+                         "collection", "institution", "museum"],
+        "notes":        ["note", "notes", "text", "comment", "annotation",
+                         "memo", "description"],
+    }
+
+    _CATEGORY_TO_TAG = {
+        "People":       "people",
+        "Families":     "families",
+        "Events":       "events",
+        "Places":       "places",
+        "Sources":      "sources",
+        "Citations":    "sources",
+        "Media":        "media",
+        "Repositories": "repositories",
+        "Notes":        "notes",
+    }
+
+    def _current_view_tag(self) -> str | None:
+        """Return the tool tag for the currently active Gramps view, or None."""
+        try:
+            active = self.uistate.viewmanager.active_page
+            if active and hasattr(active, "category"):
+                return self._CATEGORY_TO_TAG.get(active.category[1])
+        except Exception:
+            pass
+        return None
+
+    def _select_tools(self, current_message: str) -> list:
+        """
+        Return a filtered tools schema based on keywords in the current
+        message and recent conversation history.
+
+        When 'Simplify tools' is off, all tools are returned unchanged.
+        When on, scans the last 4 messages plus the current message for
+        keywords and returns only matching tools (plus always-on tools).
+        Falls back to the current Gramps view's tool set if no keywords match.
+        """
+        if not _cfg.get("chat.simplify_tools"):
+            return get_tools_schema(_cfg.get("backend.type")) if tool_registry else []
+
+        # Build search text from current message + recent history
+        search_text = current_message.lower()
+        for msg in self._messages[-4:]:
+            content = msg.get("content")
+            if isinstance(content, str):
+                search_text += " " + content.lower()
+
+        active_tags = set()
+        for tag, keywords in self._TOOL_KEYWORDS.items():
+            if any(kw in search_text for kw in keywords):
+                active_tags.add(tag)
+
+        # If nothing matched, fall back to the current view's tag
+        if not active_tags:
+            view_tag = self._current_view_tag()
+            if view_tag:
+                active_tags.add(view_tag)
+
+        return get_tools_schema(_cfg.get("backend.type"), tags=active_tags) if tool_registry else []
 
     # ------------------------------------------------------------------
     # Backend factory
@@ -1071,14 +1151,17 @@ class GrampsAssist(BaseAssistPanel):
         grid.attach(sys_scroll, 1, row[0], 1, 1)
         row[0] += 1
 
-        # # ── Include context checkbox ────────────────────────────────────
-        # ctx_check = Gtk.CheckButton(
-        #     label="Include active person context in system prompt"
-        # )
-        # ctx_check.set_active(_cfg.get("chat.include_context"))
-        # grid.attach(ctx_check, 1, row[0], 1, 1)
-        # row[0] += 1
-
+        # ── Simplify tools checkbox ─────────────────────────────────────
+        simplify_check = Gtk.CheckButton(
+            label=_("Simplify tools (recommended for smaller/local models)")
+        )
+        simplify_check.set_active(_cfg.get("chat.simplify_tools"))
+        simplify_check.set_tooltip_text(
+            _("When enabled, only the tools relevant to your question are sent "
+              "to the model. This improves performance with smaller local models.")
+        )
+        grid.attach(simplify_check, 1, row[0], 1, 1)
+        row[0] += 1
 
         dialog.show_all()
         _update_custom_visibility()  # hide custom rows if not needed
@@ -1095,7 +1178,7 @@ class GrampsAssist(BaseAssistPanel):
                 sys_buf.get_start_iter(), sys_buf.get_end_iter(), False
             )
             _cfg.set("chat.system_prompt", sys_prompt)
-            #_cfg.set("chat.include_context", ctx_check.get_active())
+            _cfg.set("chat.simplify_tools", simplify_check.get_active())
             _cfg.save()
             self._update_context_label()
 
