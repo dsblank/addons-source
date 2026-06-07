@@ -19,6 +19,7 @@ from gramps.gen.filters.rules.note import NotePrivate
 from gramps.gen.filters.rules.person import (
     Disconnected,
     HasAlternateName,
+    HasNickname,
     HasOtherGender,
     HasUnknownGender,
     IsFemale,
@@ -59,7 +60,7 @@ EXAMPLE = os.path.join(TEST_DIR, "example.gramps")
 # ---------------------------------------------------------------------------
 
 
-def _make_person(gender, family_handles=(), parent_family_handles=(), alt_names=()):
+def _make_person(gender, family_handles=(), parent_family_handles=(), alt_names=(), nick=""):
     """Return a Person object pre-populated with the given attributes."""
     p = Person()
     p.set_gender(gender)
@@ -73,6 +74,8 @@ def _make_person(gender, family_handles=(), parent_family_handles=(), alt_names=
         sn.set_surname(name_str)
         n.add_surname(sn)
         p.add_alternate_name(n)
+    if nick:
+        p.primary_name.set_nick_name(nick)
     return p
 
 
@@ -127,6 +130,9 @@ class SmallDatabaseTestsMixin:
         cls.h_other_connected = _commit(
             cls.db, _make_person(Person.OTHER, family_handles=["fam_other"])
         )
+        cls.h_with_nick = _commit(
+            cls.db, _make_person(Person.MALE, nick="Bubba")
+        )
         register_rules(cls.db)
 
     @classmethod
@@ -146,7 +152,7 @@ class SmallDatabaseTestsMixin:
         self.assertNotIn(self.h_other_connected, result)
 
     def test_ismale_count(self):
-        self.assertEqual(len(self._apply(IsMale([]))), 2)
+        self.assertEqual(len(self._apply(IsMale([]))), 3)
 
     def test_isfemale_returns_only_females(self):
         result = self._apply(IsFemale([]))
@@ -170,7 +176,7 @@ class SmallDatabaseTestsMixin:
         self.assertNotIn(self.h_unknown_connected, result)
 
     def test_disconnected_count(self):
-        self.assertEqual(len(self._apply(Disconnected([]))), 3)
+        self.assertEqual(len(self._apply(Disconnected([]))), 4)
 
     def test_hasalternatename_returns_persons_with_alt_names(self):
         result = self._apply(HasAlternateName([]))
@@ -223,7 +229,7 @@ class SmallDatabaseTestsMixin:
         self.assertNotIn(self.h_other_connected, result)
 
     def test_nevermarried_count(self):
-        self.assertEqual(len(self._apply(NeverMarried([]))), 4)
+        self.assertEqual(len(self._apply(NeverMarried([]))), 5)
 
     def test_multiplemarriages_returns_persons_with_multiple_families(self):
         result = self._apply(MultipleMarriages([]))
@@ -234,6 +240,15 @@ class SmallDatabaseTestsMixin:
         never = self._apply(NeverMarried([]))
         multi = self._apply(MultipleMarriages([]))
         self.assertEqual(never & multi, set())
+
+    def test_hasnickname_returns_persons_with_nick(self):
+        result = self._apply(HasNickname([]))
+        self.assertIn(self.h_with_nick, result)
+        self.assertNotIn(self.h_male_disconnected, result)
+        self.assertNotIn(self.h_female_connected, result)
+
+    def test_hasnickname_count(self):
+        self.assertEqual(len(self._apply(HasNickname([]))), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +399,18 @@ class ExampleDatabaseTestsMixin:
         multi = len(self._apply(MultipleMarriages([])))
         self.assertLessEqual(never + multi, total)
 
+    def test_hasnickname_result_is_subset_of_python_result(self):
+        # SQL checks primary_name.nick only (approximation); result must be a
+        # subset of the full Python result (no false positives allowed).
+        python_expected = {
+            "cc8205d883763f02abd",
+            "GNUJQCL9MD64AM56OH",
+            "Q8HKQC3VMRM1M6M7ES",
+        }
+        result = self._apply(HasNickname([]))
+        self.assertTrue(result.issubset(python_expected))
+        self.assertGreater(len(result), 0)
+
 
 # ---------------------------------------------------------------------------
 # SQLPathTestsMixin
@@ -418,6 +445,9 @@ class SQLPathTestsMixin:
         )
         cls.h_multi = _commit(
             cls.db, _make_person(Person.MALE, family_handles=["fam2", "fam3"])
+        )
+        cls.h_with_nick = _commit(
+            cls.db, _make_person(Person.FEMALE, nick="Jinx")
         )
         register_rules(cls.db)
 
@@ -525,6 +555,17 @@ class SQLPathTestsMixin:
             rule,
             expected_in=[self.h_multi],
             expected_out=[self.h_male, self.h_connected],
+        )
+
+    def test_hasnickname_sql_path_and_correctness(self):
+        result, rule = self._run(HasNickname, [])
+        self.assertIn(self.h_with_nick, result)
+        self.assertNotIn(self.h_male, result)
+        self.assertNotIn(self.h_female, result)
+        self._assert_sql_path(
+            rule,
+            expected_in=[self.h_with_nick],
+            expected_out=[self.h_male, self.h_female],
         )
 
     def test_override_prepare_called_only_once(self):

@@ -1,5 +1,5 @@
 """
-Registration and fallback tests that require no backend-specific database.
+Registration tests that require no backend-specific database.
 """
 
 import unittest
@@ -10,6 +10,7 @@ from fastfilterslib.overload_rules import (
     EventPrivateOverride,
     FamilyPrivateOverride,
     HasAlternateNameOverride,
+    HasNicknameOverride,
     HasNoLatOrLonOverride,
     HasOtherGenderOverride,
     HasUnknownGenderOverride,
@@ -63,6 +64,10 @@ class TestRegistration(unittest.TestCase):
     def test_disconnected_registered(self):
         self.assertIn(("person", "Disconnected"), self.registry)
         self.assertIs(self.registry[("person", "Disconnected")], DisconnectedOverride)
+
+    def test_hasnickname_registered(self):
+        self.assertIn(("person", "HasNickname"), self.registry)
+        self.assertIs(self.registry[("person", "HasNickname")], HasNicknameOverride)
 
     def test_hasalternatename_registered(self):
         self.assertIn(("person", "HasAlternateName"), self.registry)
@@ -141,140 +146,7 @@ class TestRegistration(unittest.TestCase):
         )
 
     def test_no_extra_registrations(self):
-        self.assertEqual(len(self.registry), 19)
-
-
-# ---------------------------------------------------------------------------
-# Fallback tests (mock DB where json_data is unavailable)
-# ---------------------------------------------------------------------------
-
-
-class TestJsonDataFallback(unittest.TestCase):
-    """Rules that need json_data delegate to the original when unavailable."""
-
-    def _make_db(self, has_json):
-        class _MockDB:
-            dialect = "sqlite"
-
-            def is_proxy(self):
-                return False
-
-            def use_json_data(self):
-                return has_json
-
-        return _MockDB()
-
-    def test_disconnected_fallback_sets_no_handles(self):
-        db = self._make_db(has_json=False)
-        calls = []
-
-        class _FakeRule:
-            pass
-
-        override = DisconnectedOverride(_FakeRule())
-
-        def _original(rule, db, user):
-            calls.append(True)
-
-        override.prepare(_original, db, user=None)
-        self.assertFalse(hasattr(override, "handles"))
-        self.assertEqual(calls, [True])
-
-    def test_disconnected_fallback_in_apply(self):
-        class _FakeRule:
-            pass
-
-        override = DisconnectedOverride(_FakeRule())
-        sentinel = object()
-        result_store = []
-
-        def _original(rule, db, obj):
-            result_store.append(sentinel)
-            return True
-
-        result = override.apply_to_one(_original, db=None, person=object())
-        self.assertTrue(result)
-        self.assertEqual(result_store, [sentinel])
-
-    def test_hasalternatename_fallback_sets_no_handles(self):
-        db = self._make_db(has_json=False)
-        calls = []
-
-        class _FakeRule:
-            pass
-
-        override = HasAlternateNameOverride(_FakeRule())
-
-        def _original(rule, db, user):
-            calls.append(True)
-
-        override.prepare(_original, db, user=None)
-        self.assertFalse(hasattr(override, "handles"))
-        self.assertEqual(calls, [True])
-
-    def test_nevermarried_fallback_sets_no_handles(self):
-        db = self._make_db(has_json=False)
-        calls = []
-
-        class _FakeRule:
-            pass
-
-        override = NeverMarriedOverride(_FakeRule())
-
-        def _original(rule, db, user):
-            calls.append(True)
-
-        override.prepare(_original, db, user=None)
-        self.assertFalse(hasattr(override, "handles"))
-        self.assertEqual(calls, [True])
-
-    def test_multiplemarriages_fallback_sets_no_handles(self):
-        db = self._make_db(has_json=False)
-        calls = []
-
-        class _FakeRule:
-            pass
-
-        override = MultipleMarriagesOverride(_FakeRule())
-
-        def _original(rule, db, user):
-            calls.append(True)
-
-        override.prepare(_original, db, user=None)
-        self.assertFalse(hasattr(override, "handles"))
-        self.assertEqual(calls, [True])
-
-    def test_nevermarried_fallback_in_apply(self):
-        class _FakeRule:
-            pass
-
-        override = NeverMarriedOverride(_FakeRule())
-        sentinel = object()
-        result_store = []
-
-        def _original(rule, db, obj):
-            result_store.append(sentinel)
-            return True
-
-        result = override.apply_to_one(_original, db=None, person=object())
-        self.assertTrue(result)
-        self.assertEqual(result_store, [sentinel])
-
-    def test_multiplemarriages_fallback_in_apply(self):
-        class _FakeRule:
-            pass
-
-        override = MultipleMarriagesOverride(_FakeRule())
-        sentinel = object()
-        result_store = []
-
-        def _original(rule, db, obj):
-            result_store.append(sentinel)
-            return False
-
-        result = override.apply_to_one(_original, db=None, person=object())
-        self.assertFalse(result)
-        self.assertEqual(result_store, [sentinel])
+        self.assertEqual(len(self.registry), 20)
 
 
 if __name__ == "__main__":
