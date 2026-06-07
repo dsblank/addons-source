@@ -519,15 +519,15 @@ class SQLPathTestsMixin:
         return set(f.apply(self.db)), rule
 
     def _assert_sql_path(self, rule, expected_in, expected_out):
-        override = getattr(rule, "_db_override", None)
-        self.assertIsNotNone(override, "override instance must be attached to rule")
-        self.assertIsInstance(
-            override.handles, frozenset, "handles must be a frozenset (SQL path taken)"
+        self.assertTrue(
+            hasattr(rule, "selected_handles"),
+            "rule.selected_handles must be set (SQL path taken)",
         )
+        self.assertIsInstance(rule.selected_handles, frozenset)
         for h in expected_in:
-            self.assertIn(h, override.handles)
+            self.assertIn(h, rule.selected_handles)
         for h in expected_out:
-            self.assertNotIn(h, override.handles)
+            self.assertNotIn(h, rule.selected_handles)
 
     def test_ismale_sql_path_and_correctness(self):
         result, rule = self._run(IsMale, [])

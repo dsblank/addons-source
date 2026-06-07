@@ -35,24 +35,24 @@ class IsMaleOverride(RuleOverride):
 
     def prepare(self, original, db, user):
         # gender is a secondary column: 1 = MALE, 0 = FEMALE, 2 = UNKNOWN
-        self.handles = _fetch_handles(
+        self.rule.selected_handles = _fetch_handles(
             db, "SELECT handle FROM person WHERE gender = 1"
         )
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class IsFemaleOverride(RuleOverride):
     """Fast SQL replacement for person.IsFemale."""
 
     def prepare(self, original, db, user):
-        self.handles = _fetch_handles(
+        self.rule.selected_handles = _fetch_handles(
             db, "SELECT handle FROM person WHERE gender = 0"
         )
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class DisconnectedOverride(RuleOverride):
@@ -68,10 +68,10 @@ class DisconnectedOverride(RuleOverride):
         fl = compat.json_array_length("json_data", "family_list")
         pfl = compat.json_array_length("json_data", "parent_family_list")
         sql = f"SELECT handle FROM person WHERE {fl} = 0 AND {pfl} = 0"
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class HasNicknameOverride(RuleOverride):
@@ -86,10 +86,10 @@ class HasNicknameOverride(RuleOverride):
         compat = SQLCompat.for_db(db)
         nick = compat.json_extract("json_data", "primary_name.nick")
         sql = f"SELECT handle FROM person WHERE TRIM(COALESCE({nick}, '')) != ''"
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class HasAlternateNameOverride(RuleOverride):
@@ -103,10 +103,10 @@ class HasAlternateNameOverride(RuleOverride):
         compat = SQLCompat.for_db(db)
         al = compat.json_array_length("json_data", "alternate_names")
         sql = f"SELECT handle FROM person WHERE {al} > 0"
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class HasUnknownGenderOverride(RuleOverride):
@@ -114,12 +114,12 @@ class HasUnknownGenderOverride(RuleOverride):
 
     def prepare(self, original, db, user):
         # gender is a secondary column: 0 = FEMALE, 1 = MALE, 2 = UNKNOWN
-        self.handles = _fetch_handles(
+        self.rule.selected_handles = _fetch_handles(
             db, "SELECT handle FROM person WHERE gender = 2"
         )
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class HasOtherGenderOverride(RuleOverride):
@@ -127,12 +127,12 @@ class HasOtherGenderOverride(RuleOverride):
 
     def prepare(self, original, db, user):
         # gender is a secondary column: 3 = OTHER
-        self.handles = _fetch_handles(
+        self.rule.selected_handles = _fetch_handles(
             db, "SELECT handle FROM person WHERE gender = 3"
         )
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class NeverMarriedOverride(RuleOverride):
@@ -145,10 +145,10 @@ class NeverMarriedOverride(RuleOverride):
         compat = SQLCompat.for_db(db)
         fl = compat.json_array_length("json_data", "family_list")
         sql = f"SELECT handle FROM person WHERE {fl} = 0"
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class MultipleMarriagesOverride(RuleOverride):
@@ -162,10 +162,10 @@ class MultipleMarriagesOverride(RuleOverride):
         compat = SQLCompat.for_db(db)
         fl = compat.json_array_length("json_data", "family_list")
         sql = f"SELECT handle FROM person WHERE {fl} > 1"
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 # ---------------------------------------------------------------------------
@@ -199,10 +199,10 @@ class MissingParentOverride(RuleOverride):
                        OR f.mother_handle IS NULL OR f.mother_handle = ''
                   )
         """
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class HaveChildrenOverride(RuleOverride):
@@ -227,10 +227,10 @@ class HaveChildrenOverride(RuleOverride):
                    WHERE {crl_len} > 0
                  )
         """
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class NoBirthdateOverride(RuleOverride):
@@ -258,10 +258,10 @@ class NoBirthdateOverride(RuleOverride):
             END
             WHERE COALESCE({sortval}, 0) = 0
         """
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class NoDeathdateOverride(RuleOverride):
@@ -286,10 +286,10 @@ class NoDeathdateOverride(RuleOverride):
             END
             WHERE COALESCE({sortval}, 0) = 0
         """
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 # ---------------------------------------------------------------------------
@@ -332,10 +332,10 @@ class HaveAltFamiliesOverride(RuleOverride):
                 )
             )
         """
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        return person.handle in self.handles
+        return person.handle in self.rule.selected_handles
 
 
 class IncompleteNamesOverride(RuleOverride):
@@ -398,12 +398,12 @@ class _IsPrivateOverride(RuleOverride):
 
     def prepare(self, original, db, user):
         compat = SQLCompat.for_db(db)
-        self.handles = _fetch_handles(
+        self.rule.selected_handles = _fetch_handles(
             db, f"SELECT handle FROM {self._table} WHERE private = {compat.true()}"
         )
 
     def apply_to_one(self, original, db, obj):
-        return obj.handle in self.handles
+        return obj.handle in self.rule.selected_handles
 
 
 class PeoplePrivateOverride(_IsPrivateOverride):
@@ -417,12 +417,12 @@ class PeoplePublicOverride(RuleOverride):
 
     def prepare(self, original, db, user):
         compat = SQLCompat.for_db(db)
-        self.handles = _fetch_handles(
+        self.rule.selected_handles = _fetch_handles(
             db, f"SELECT handle FROM person WHERE private = {compat.false()}"
         )
 
     def apply_to_one(self, original, db, obj):
-        return obj.handle in self.handles
+        return obj.handle in self.rule.selected_handles
 
 
 class FamilyPrivateOverride(_IsPrivateOverride):
@@ -488,7 +488,7 @@ class HasNoLatOrLonOverride(RuleOverride):
     """
 
     def prepare(self, original, db, user):
-        self.handles = _fetch_handles(
+        self.rule.selected_handles = _fetch_handles(
             db,
             "SELECT handle FROM place"
             " WHERE TRIM(COALESCE(lat, '')) = ''"
@@ -496,7 +496,7 @@ class HasNoLatOrLonOverride(RuleOverride):
         )
 
     def apply_to_one(self, original, db, obj):
-        return obj.handle in self.handles
+        return obj.handle in self.rule.selected_handles
 
 
 # ---------------------------------------------------------------------------
