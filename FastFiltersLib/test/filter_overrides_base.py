@@ -22,10 +22,14 @@ from gramps.gen.filters.rules.person import (
     HasNickname,
     HasOtherGender,
     HasUnknownGender,
+    HaveChildren,
     IsFemale,
     IsMale,
+    MissingParent,
     MultipleMarriages,
     NeverMarried,
+    NoBirthdate,
+    NoDeathdate,
     PeoplePrivate,
     PeoplePublic,
 )
@@ -34,8 +38,11 @@ from gramps.gen.filters.rules.repository import RepoPrivate
 from gramps.gen.filters.rules.source import SourcePrivate
 from gramps.gen.db import DbTxn
 from gramps.gen.lib import (
+    ChildRef,
     Citation,
+    Date,
     Event,
+    EventRef,
     Family,
     Media,
     Name,
@@ -399,6 +406,18 @@ class ExampleDatabaseTestsMixin:
         multi = len(self._apply(MultipleMarriages([])))
         self.assertLessEqual(never + multi, total)
 
+    def test_missingparent_count_matches_expected(self):
+        self.assertEqual(len(self._apply(MissingParent([]))), 868)
+
+    def test_havechildren_count_matches_expected(self):
+        self.assertEqual(len(self._apply(HaveChildren([]))), 905)
+
+    def test_nobirthdate_count_matches_expected(self):
+        self.assertEqual(len(self._apply(NoBirthdate([]))), 981)
+
+    def test_nodeathdate_count_matches_expected(self):
+        self.assertEqual(len(self._apply(NoDeathdate([]))), 1603)
+
     def test_hasnickname_result_is_subset_of_python_result(self):
         # SQL checks primary_name.nick only (approximation); result must be a
         # subset of the full Python result (no false positives allowed).
@@ -587,6 +606,213 @@ class SQLPathTestsMixin:
             IsMaleOverride.prepare = original_prepare
 
         self.assertEqual(prepare_calls, [1], "prepare() must fire exactly once")
+
+
+# ---------------------------------------------------------------------------
+# Tier3TestsMixin
+# ---------------------------------------------------------------------------
+
+
+def _make_dated_event(sortval_nonzero=True):
+    """Return an Event with a date whose sortval is non-zero iff requested."""
+    e = Event()
+    d = Date()
+    if sortval_nonzero:
+        d.set_yr_mon_day(1980, 6, 15)
+    e.set_date_object(d)
+    return e
+
+
+def _make_person_with_birth(db, event_handle):
+    """Return a Person whose birth event reference points to event_handle."""
+    p = Person()
+    eref = EventRef()
+    eref.ref = event_handle
+    p.set_birth_ref(eref)
+    return p
+
+
+def _make_person_with_death(db, event_handle):
+    """Return a Person whose death event reference points to event_handle."""
+    p = Person()
+    eref = EventRef()
+    eref.ref = event_handle
+    p.set_death_ref(eref)
+    return p
+
+
+class Tier3TestsMixin:
+    """
+    Integration tests for MissingParent, HaveChildren, NoBirthdate, NoDeathdate.
+
+    Subclasses must implement _open_db() returning an empty, open DBAPI db.
+    """
+
+    @classmethod
+    def _open_db(cls):
+        raise NotImplementedError
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = cls._open_db()
+
+        # --- Families ---
+        # Both parents present
+        fam_complete = Family()
+        fam_complete.set_father_handle("father_h1")
+        fam_complete.set_mother_handle("mother_h1")
+        cls.h_fam_complete = _commit(cls.db, fam_complete)
+
+        # Missing father
+        fam_no_father = Family()
+        fam_no_father.set_mother_handle("mother_h2")
+        cls.h_fam_no_father = _commit(cls.db, fam_no_father)
+
+        # Missing mother
+        fam_no_mother = Family()
+        fam_no_mother.set_father_handle("father_h3")
+        cls.h_fam_no_mother = _commit(cls.db, fam_no_mother)
+
+        # Family with children
+        fam_with_children = Family()
+        cref = ChildRef()
+        cref.ref = "child_h1"
+        fam_with_children.add_child_ref(cref)
+        cls.h_fam_with_children = _commit(cls.db, fam_with_children)
+
+        # Family without children
+        cls.h_fam_no_children = _commit(cls.db, Family())
+
+        # --- Events ---
+        cls.h_evt_dated = _commit(cls.db, _make_dated_event(sortval_nonzero=True))
+        cls.h_evt_no_date = _commit(cls.db, _make_dated_event(sortval_nonzero=False))
+
+        # --- Persons for MissingParent ---
+        cls.h_no_parent_families = _commit(cls.db, Person())
+
+        p_complete = Person()
+        p_complete.add_parent_family_handle(cls.h_fam_complete)
+        cls.h_has_both_parents = _commit(cls.db, p_complete)
+
+        p_miss_father = Person()
+        p_miss_father.add_parent_family_handle(cls.h_fam_no_father)
+        cls.h_missing_father = _commit(cls.db, p_miss_father)
+
+        p_miss_mother = Person()
+        p_miss_mother.add_parent_family_handle(cls.h_fam_no_mother)
+        cls.h_missing_mother = _commit(cls.db, p_miss_mother)
+
+        # --- Persons for HaveChildren ---
+        p_has_children = Person()
+        p_has_children.add_family_handle(cls.h_fam_with_children)
+        cls.h_has_children = _commit(cls.db, p_has_children)
+
+        p_no_children = Person()
+        p_no_children.add_family_handle(cls.h_fam_no_children)
+        cls.h_no_children = _commit(cls.db, p_no_children)
+
+        cls.h_no_families = _commit(cls.db, Person())
+
+        # --- Persons for NoBirthdate / NoDeathdate ---
+        cls.h_no_birth_ref = _commit(cls.db, Person())
+        cls.h_birth_no_date = _commit(
+            cls.db, _make_person_with_birth(cls.db, cls.h_evt_no_date)
+        )
+        cls.h_has_birthdate = _commit(
+            cls.db, _make_person_with_birth(cls.db, cls.h_evt_dated)
+        )
+
+        cls.h_no_death_ref = _commit(cls.db, Person())
+        cls.h_death_no_date = _commit(
+            cls.db, _make_person_with_death(cls.db, cls.h_evt_no_date)
+        )
+        cls.h_has_deathdate = _commit(
+            cls.db, _make_person_with_death(cls.db, cls.h_evt_dated)
+        )
+
+        register_rules(cls.db)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.db.close()
+
+    def _apply(self, rule):
+        return _apply(self.db, rule)
+
+    # ------------------------------------------------------------------
+    # MissingParent
+    # ------------------------------------------------------------------
+
+    def test_missingparent_matches_no_parent_families(self):
+        result = self._apply(MissingParent([]))
+        self.assertIn(self.h_no_parent_families, result)
+
+    def test_missingparent_matches_missing_father(self):
+        result = self._apply(MissingParent([]))
+        self.assertIn(self.h_missing_father, result)
+
+    def test_missingparent_matches_missing_mother(self):
+        result = self._apply(MissingParent([]))
+        self.assertIn(self.h_missing_mother, result)
+
+    def test_missingparent_excludes_complete_family(self):
+        result = self._apply(MissingParent([]))
+        self.assertNotIn(self.h_has_both_parents, result)
+
+    # ------------------------------------------------------------------
+    # HaveChildren
+    # ------------------------------------------------------------------
+
+    def test_havechildren_matches_person_in_family_with_children(self):
+        result = self._apply(HaveChildren([]))
+        self.assertIn(self.h_has_children, result)
+
+    def test_havechildren_excludes_person_in_childless_family(self):
+        result = self._apply(HaveChildren([]))
+        self.assertNotIn(self.h_no_children, result)
+
+    def test_havechildren_excludes_person_with_no_families(self):
+        result = self._apply(HaveChildren([]))
+        self.assertNotIn(self.h_no_families, result)
+
+    def test_havechildren_and_missingparent_are_independent(self):
+        have = self._apply(HaveChildren([]))
+        miss = self._apply(MissingParent([]))
+        # Both sets can overlap (a person can both have children and be missing
+        # a parent), but neither is a strict subset of the other in general.
+        self.assertIsInstance(have & miss, set)
+
+    # ------------------------------------------------------------------
+    # NoBirthdate
+    # ------------------------------------------------------------------
+
+    def test_nobirthdate_matches_person_with_no_birth_ref(self):
+        result = self._apply(NoBirthdate([]))
+        self.assertIn(self.h_no_birth_ref, result)
+
+    def test_nobirthdate_matches_person_with_undated_birth(self):
+        result = self._apply(NoBirthdate([]))
+        self.assertIn(self.h_birth_no_date, result)
+
+    def test_nobirthdate_excludes_person_with_dated_birth(self):
+        result = self._apply(NoBirthdate([]))
+        self.assertNotIn(self.h_has_birthdate, result)
+
+    # ------------------------------------------------------------------
+    # NoDeathdate
+    # ------------------------------------------------------------------
+
+    def test_nodeathdate_matches_person_with_no_death_ref(self):
+        result = self._apply(NoDeathdate([]))
+        self.assertIn(self.h_no_death_ref, result)
+
+    def test_nodeathdate_matches_person_with_undated_death(self):
+        result = self._apply(NoDeathdate([]))
+        self.assertIn(self.h_death_no_date, result)
+
+    def test_nodeathdate_excludes_person_with_dated_death(self):
+        result = self._apply(NoDeathdate([]))
+        self.assertNotIn(self.h_has_deathdate, result)
 
 
 # ---------------------------------------------------------------------------

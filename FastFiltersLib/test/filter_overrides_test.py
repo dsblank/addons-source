@@ -14,11 +14,15 @@ from fastfilterslib.overload_rules import (
     HasNoLatOrLonOverride,
     HasOtherGenderOverride,
     HasUnknownGenderOverride,
+    HaveChildrenOverride,
     IsFemaleOverride,
     IsMaleOverride,
     MediaPrivateOverride,
+    MissingParentOverride,
     MultipleMarriagesOverride,
     NeverMarriedOverride,
+    NoBirthdateOverride,
+    NoDeathdateOverride,
     NotePrivateOverride,
     PeoplePrivateOverride,
     PeoplePublicOverride,
@@ -145,8 +149,24 @@ class TestRegistration(unittest.TestCase):
             self.registry[("place", "HasNoLatOrLon")], HasNoLatOrLonOverride
         )
 
+    def test_missingparent_registered(self):
+        self.assertIn(("person", "MissingParent"), self.registry)
+        self.assertIs(self.registry[("person", "MissingParent")], MissingParentOverride)
+
+    def test_havechildren_registered(self):
+        self.assertIn(("person", "HaveChildren"), self.registry)
+        self.assertIs(self.registry[("person", "HaveChildren")], HaveChildrenOverride)
+
+    def test_nobirthdate_registered(self):
+        self.assertIn(("person", "NoBirthdate"), self.registry)
+        self.assertIs(self.registry[("person", "NoBirthdate")], NoBirthdateOverride)
+
+    def test_nodeathdate_registered(self):
+        self.assertIn(("person", "NoDeathdate"), self.registry)
+        self.assertIs(self.registry[("person", "NoDeathdate")], NoDeathdateOverride)
+
     def test_no_extra_registrations(self):
-        self.assertEqual(len(self.registry), 20)
+        self.assertEqual(len(self.registry), 24)
 
 
 if __name__ == "__main__":

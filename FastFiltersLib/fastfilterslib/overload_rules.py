@@ -169,6 +169,130 @@ class MultipleMarriagesOverride(RuleOverride):
 
 
 # ---------------------------------------------------------------------------
+# Tier 3 person overrides — single JOIN required
+# ---------------------------------------------------------------------------
+
+
+class MissingParentOverride(RuleOverride):
+    """Fast SQL replacement for person.MissingParent.
+
+    Matches persons who have no parent families, or whose parent family is
+    missing a father or mother.  father_handle / mother_handle are secondary
+    columns on the family table; parent_family_list is traversed via json_each.
+    """
+
+    def prepare(self, original, db, user):
+        compat = SQLCompat.for_db(db)
+        pfl_len = compat.json_array_length("p.json_data", "parent_family_list")
+        pfl_from, pfl_val = compat.json_each_text(
+            "p.json_data", "parent_family_list", "pfl"
+        )
+        sql = f"""
+            SELECT p.handle
+            FROM person p
+            WHERE {pfl_len} = 0
+               OR EXISTS (
+                    SELECT 1
+                    FROM {pfl_from}
+                    JOIN family f ON f.handle = {pfl_val}
+                    WHERE f.father_handle IS NULL OR f.father_handle = ''
+                       OR f.mother_handle IS NULL OR f.mother_handle = ''
+                  )
+        """
+        self.handles = _fetch_handles(db, sql)
+
+    def apply_to_one(self, original, db, person):
+        return person.handle in self.handles
+
+
+class HaveChildrenOverride(RuleOverride):
+    """Fast SQL replacement for person.HaveChildren.
+
+    Matches persons who are a spouse in at least one family that has children.
+    family_list is traversed via json_each; child_ref_list length is read from
+    family.json_data.
+    """
+
+    def prepare(self, original, db, user):
+        compat = SQLCompat.for_db(db)
+        fl_from, fl_val = compat.json_each_text("p.json_data", "family_list", "fl")
+        crl_len = compat.json_array_length("f.json_data", "child_ref_list")
+        sql = f"""
+            SELECT p.handle
+            FROM person p
+            WHERE EXISTS (
+                   SELECT 1
+                   FROM {fl_from}
+                   JOIN family f ON f.handle = {fl_val}
+                   WHERE {crl_len} > 0
+                 )
+        """
+        self.handles = _fetch_handles(db, sql)
+
+    def apply_to_one(self, original, db, person):
+        return person.handle in self.handles
+
+
+class NoBirthdateOverride(RuleOverride):
+    """Fast SQL replacement for person.NoBirthdate.
+
+    Matches persons who have no birth event, or whose birth event has no date
+    (date.sortval == 0).  birth_ref_index is a secondary column; the event is
+    located via a dynamic array-index path wrapped in CASE WHEN birth_ref_index
+    >= 0 to prevent the -1 sentinel from being used as a path component (SQLite
+    rejects negative JSON path indices; PostgreSQL treats them as reverse offsets).
+    """
+
+    def prepare(self, original, db, user):
+        compat = SQLCompat.for_db(db)
+        birth_handle = compat.json_dynamic_array_field(
+            "p.json_data", "event_ref_list", "p.birth_ref_index", "ref"
+        )
+        sortval = compat.json_extract_int("e.json_data", "date.sortval")
+        sql = f"""
+            SELECT p.handle
+            FROM person p
+            LEFT JOIN event e ON e.handle = CASE
+                WHEN p.birth_ref_index >= 0 THEN {birth_handle}
+                ELSE NULL
+            END
+            WHERE COALESCE({sortval}, 0) = 0
+        """
+        self.handles = _fetch_handles(db, sql)
+
+    def apply_to_one(self, original, db, person):
+        return person.handle in self.handles
+
+
+class NoDeathdateOverride(RuleOverride):
+    """Fast SQL replacement for person.NoDeathdate.
+
+    Identical structure to NoBirthdateOverride, using death_ref_index instead
+    of birth_ref_index.  Same CASE WHEN guard applies.
+    """
+
+    def prepare(self, original, db, user):
+        compat = SQLCompat.for_db(db)
+        death_handle = compat.json_dynamic_array_field(
+            "p.json_data", "event_ref_list", "p.death_ref_index", "ref"
+        )
+        sortval = compat.json_extract_int("e.json_data", "date.sortval")
+        sql = f"""
+            SELECT p.handle
+            FROM person p
+            LEFT JOIN event e ON e.handle = CASE
+                WHEN p.death_ref_index >= 0 THEN {death_handle}
+                ELSE NULL
+            END
+            WHERE COALESCE({sortval}, 0) = 0
+        """
+        self.handles = _fetch_handles(db, sql)
+
+    def apply_to_one(self, original, db, person):
+        return person.handle in self.handles
+
+
+# ---------------------------------------------------------------------------
 # Private / public overrides (all object types)
 # ---------------------------------------------------------------------------
 
@@ -302,6 +426,11 @@ def register_rules(db):
     db.register_rule_override(("person", "HasOtherGender"), HasOtherGenderOverride)
     db.register_rule_override(("person", "NeverMarried"), NeverMarriedOverride)
     db.register_rule_override(("person", "MultipleMarriages"), MultipleMarriagesOverride)
+    # Tier 3 person rules — single JOIN
+    db.register_rule_override(("person", "MissingParent"), MissingParentOverride)
+    db.register_rule_override(("person", "HaveChildren"), HaveChildrenOverride)
+    db.register_rule_override(("person", "NoBirthdate"), NoBirthdateOverride)
+    db.register_rule_override(("person", "NoDeathdate"), NoDeathdateOverride)
     # Private / public rules (all object types)
     db.register_rule_override(("person", "PeoplePrivate"), PeoplePrivateOverride)
     db.register_rule_override(("person", "PeoplePublic"), PeoplePublicOverride)

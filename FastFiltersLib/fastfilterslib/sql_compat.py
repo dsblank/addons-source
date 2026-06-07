@@ -106,6 +106,65 @@ class SQLCompat:
             expr = f"({expr}->'{part}')"
         return f"json_array_length({expr})"
 
+    def json_each_text(self, column, path, alias):
+        """
+        Return (from_clause, value_ref) for iterating a JSON text array.
+
+        column: SQL column name containing JSON
+        path:   dot-separated path to the array field
+        alias:  table alias to use for the generated rows
+
+        SQLite:     from_clause = json_each(json_extract(<col>, '$.<path>')) AS <alias>
+                    value_ref   = <alias>.value
+        PostgreSQL: from_clause = jsonb_array_elements_text(<col>::jsonb->'<path>') AS <alias>
+                    value_ref   = <alias>
+        """
+        if self.dialect == self.SQLITE:
+            return (
+                f"json_each(json_extract({column}, '$.{path}')) AS {alias}",
+                f"{alias}.value",
+            )
+        parts = path.split(".")
+        expr = f"{column}::jsonb"
+        for part in parts:
+            expr = f"({expr}->'{part}')"
+        return (f"jsonb_array_elements_text({expr}) AS {alias}", alias)
+
+    def json_dynamic_array_field(self, column, array_path, index_col, field):
+        """
+        Extract a scalar field from a JSON array at a dynamic (column) index.
+
+        column:     SQL column name containing JSON
+        array_path: dot-separated path to the array
+        index_col:  SQL expression (column name) for the integer index
+        field:      field name within each array element
+
+        SQLite:     json_extract(<col>, '$.<array_path>[' || <index_col> || '].<field>')
+        PostgreSQL: (<col>::jsonb->'<array_path>'-><index_col>->>'<field>')
+        """
+        if self.dialect == self.SQLITE:
+            return (
+                f"json_extract({column}, '$.{array_path}[' || {index_col} || '].{field}')"
+            )
+        parts = array_path.split(".")
+        expr = f"{column}::jsonb"
+        for part in parts:
+            expr = f"({expr}->'{part}')"
+        return f"({expr}->{index_col}->>'{field}')"
+
+    def json_extract_int(self, column, path):
+        """
+        Extract an integer value from a JSON column.
+
+        Identical to json_extract on SQLite (types are preserved).
+        PostgreSQL's ->> operator returns text, so an explicit ::integer cast
+        is appended.
+        """
+        expr = self.json_extract(column, path)
+        if self.dialect == self.SQLITE:
+            return expr
+        return f"({expr})::integer"
+
     # ------------------------------------------------------------------
     # Pagination
     # ------------------------------------------------------------------
