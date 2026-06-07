@@ -14,6 +14,7 @@ from gramps.gen.user import User
 
 from filter_overrides_base import (
     ExampleDatabaseTestsMixin,
+    PrivateFilterTestsMixin,
     SmallDatabaseTestsMixin,
     SQLPathTestsMixin,
 )
@@ -36,6 +37,14 @@ class TestAgainstExampleDatabase(ExampleDatabaseTestsMixin, unittest.TestCase):
 
 
 class TestSQLPathIsUsed(SQLPathTestsMixin, unittest.TestCase):
+    @classmethod
+    def _open_db(cls):
+        db = make_database("sqlite")
+        db.load(":memory:")
+        return db
+
+
+class TestPrivateFilters(PrivateFilterTestsMixin, unittest.TestCase):
     @classmethod
     def _open_db(cls):
         db = make_database("sqlite")
