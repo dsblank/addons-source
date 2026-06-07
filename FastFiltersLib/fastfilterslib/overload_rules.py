@@ -293,6 +293,96 @@ class NoDeathdateOverride(RuleOverride):
 
 
 # ---------------------------------------------------------------------------
+# Tier 3+ person overrides — complex SQL or SQL + Python hybrid
+# ---------------------------------------------------------------------------
+
+
+class HaveAltFamiliesOverride(RuleOverride):
+    """Fast SQL replacement for person.HaveAltFamilies (adopted people).
+
+    Matches persons who appear in a parent family's child_ref_list with an
+    ADOPTED (value=2) father or mother relation.  Uses nested EXISTS:
+    outer iterates parent_family_list; inner iterates child_ref_list filtered
+    to this person's handle and checks frel/mrel value.
+    """
+
+    def prepare(self, original, db, user):
+        compat = SQLCompat.for_db(db)
+        pfl_from, pfl_val = compat.json_each_text(
+            "p.json_data", "parent_family_list", "pfl"
+        )
+        crl_from, crl_val = compat.json_each_json(
+            "f.json_data", "child_ref_list", "crl"
+        )
+        ref = compat.json_extract(crl_val, "ref")
+        frel = compat.json_extract_int(crl_val, "frel.value")
+        mrel = compat.json_extract_int(crl_val, "mrel.value")
+        sql = f"""
+            SELECT p.handle
+            FROM person p
+            WHERE EXISTS (
+                SELECT 1
+                FROM {pfl_from}
+                JOIN family f ON f.handle = {pfl_val}
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM {crl_from}
+                    WHERE {ref} = p.handle
+                      AND ({frel} = 2 OR {mrel} = 2)
+                )
+            )
+        """
+        self.handles = _fetch_handles(db, sql)
+
+    def apply_to_one(self, original, db, person):
+        return person.handle in self.handles
+
+
+class IncompleteNamesOverride(RuleOverride):
+    """SQL + Python hybrid replacement for person.IncompleteNames.
+
+    SQL pre-selects persons with an incomplete primary name (blank first_name,
+    empty surname_list, or a blank surname entry).  Python post-checks alternate
+    names for the remaining persons, since those are very rarely incomplete and
+    nested SQL over alternate_names → surname_list would be expensive.
+    """
+
+    def prepare(self, original, db, user):
+        compat = SQLCompat.for_db(db)
+        first = compat.json_extract("json_data", "primary_name.first_name")
+        slist_len = compat.json_array_length("json_data", "primary_name.surname_list")
+        sn_from, sn_val = compat.json_each_json(
+            "json_data", "primary_name.surname_list", "sn"
+        )
+        surname = compat.json_extract(sn_val, "surname")
+        sql = f"""
+            SELECT handle FROM person
+            WHERE TRIM(COALESCE({first}, '')) = ''
+               OR {slist_len} = 0
+               OR EXISTS (
+                    SELECT 1
+                    FROM {sn_from}
+                    WHERE TRIM(COALESCE({surname}, '')) = ''
+                  )
+        """
+        self.handles = _fetch_handles(db, sql)
+
+    def apply_to_one(self, original, db, person):
+        if person.handle in self.handles:
+            return True
+        for name in person.alternate_names:
+            if name.first_name.strip() == "":
+                return True
+            if name.surname_list:
+                for surn in name.surname_list:
+                    if surn.surname.strip() == "":
+                        return True
+            else:
+                return True
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Private / public overrides (all object types)
 # ---------------------------------------------------------------------------
 
@@ -431,6 +521,9 @@ def register_rules(db):
     db.register_rule_override(("person", "HaveChildren"), HaveChildrenOverride)
     db.register_rule_override(("person", "NoBirthdate"), NoBirthdateOverride)
     db.register_rule_override(("person", "NoDeathdate"), NoDeathdateOverride)
+    # Tier 3+ person rules — complex SQL or hybrid
+    db.register_rule_override(("person", "HaveAltFamilies"), HaveAltFamiliesOverride)
+    db.register_rule_override(("person", "IncompleteNames"), IncompleteNamesOverride)
     # Private / public rules (all object types)
     db.register_rule_override(("person", "PeoplePrivate"), PeoplePrivateOverride)
     db.register_rule_override(("person", "PeoplePublic"), PeoplePublicOverride)

@@ -106,6 +106,29 @@ class SQLCompat:
             expr = f"({expr}->'{part}')"
         return f"json_array_length({expr})"
 
+    def json_each_json(self, column, path, alias):
+        """
+        Return (from_clause, value_ref) for iterating a JSON array of objects.
+
+        Each element is a JSON object; use json_extract() / json_extract_int()
+        on value_ref to access sub-fields.
+
+        SQLite:     from_clause = json_each(json_extract(<col>, '$.<path>')) AS <alias>
+                    value_ref   = <alias>.value
+        PostgreSQL: from_clause = jsonb_array_elements(<col>::jsonb->'<path>') AS <alias>
+                    value_ref   = <alias>
+        """
+        if self.dialect == self.SQLITE:
+            return (
+                f"json_each(json_extract({column}, '$.{path}')) AS {alias}",
+                f"{alias}.value",
+            )
+        parts = path.split(".")
+        expr = f"{column}::jsonb"
+        for part in parts:
+            expr = f"({expr}->'{part}')"
+        return (f"jsonb_array_elements({expr}) AS {alias}", alias)
+
     def json_each_text(self, column, path, alias):
         """
         Return (from_clause, value_ref) for iterating a JSON text array.

@@ -17,6 +17,7 @@ from filter_overrides_base import (
     PrivateFilterTestsMixin,
     SmallDatabaseTestsMixin,
     SQLPathTestsMixin,
+    Tier3PlusTestsMixin,
     Tier3TestsMixin,
 )
 
@@ -54,6 +55,14 @@ class TestPrivateFilters(PrivateFilterTestsMixin, unittest.TestCase):
 
 
 class TestTier3Filters(Tier3TestsMixin, unittest.TestCase):
+    @classmethod
+    def _open_db(cls):
+        db = make_database("sqlite")
+        db.load(":memory:")
+        return db
+
+
+class TestTier3PlusFilters(Tier3PlusTestsMixin, unittest.TestCase):
     @classmethod
     def _open_db(cls):
         db = make_database("sqlite")

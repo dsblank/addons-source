@@ -14,7 +14,9 @@ from fastfilterslib.overload_rules import (
     HasNoLatOrLonOverride,
     HasOtherGenderOverride,
     HasUnknownGenderOverride,
+    HaveAltFamiliesOverride,
     HaveChildrenOverride,
+    IncompleteNamesOverride,
     IsFemaleOverride,
     IsMaleOverride,
     MediaPrivateOverride,
@@ -165,8 +167,20 @@ class TestRegistration(unittest.TestCase):
         self.assertIn(("person", "NoDeathdate"), self.registry)
         self.assertIs(self.registry[("person", "NoDeathdate")], NoDeathdateOverride)
 
+    def test_havealtfamilies_registered(self):
+        self.assertIn(("person", "HaveAltFamilies"), self.registry)
+        self.assertIs(
+            self.registry[("person", "HaveAltFamilies")], HaveAltFamiliesOverride
+        )
+
+    def test_incompletenames_registered(self):
+        self.assertIn(("person", "IncompleteNames"), self.registry)
+        self.assertIs(
+            self.registry[("person", "IncompleteNames")], IncompleteNamesOverride
+        )
+
     def test_no_extra_registrations(self):
-        self.assertEqual(len(self.registry), 24)
+        self.assertEqual(len(self.registry), 26)
 
 
 if __name__ == "__main__":

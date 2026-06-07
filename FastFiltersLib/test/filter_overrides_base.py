@@ -22,7 +22,9 @@ from gramps.gen.filters.rules.person import (
     HasNickname,
     HasOtherGender,
     HasUnknownGender,
+    HaveAltFamilies,
     HaveChildren,
+    IncompleteNames,
     IsFemale,
     IsMale,
     MissingParent,
@@ -53,6 +55,7 @@ from gramps.gen.lib import (
     Source,
     Surname,
 )
+from gramps.gen.lib.childreftype import ChildRefType
 
 from fastfilterslib.overload_rules import (
     IsMaleOverride,
@@ -417,6 +420,41 @@ class ExampleDatabaseTestsMixin:
 
     def test_nodeathdate_count_matches_expected(self):
         self.assertEqual(len(self._apply(NoDeathdate([]))), 1603)
+
+    def test_havealtfamilies_matches_expected_handles(self):
+        expected = {"CH5KQCIEXSN1J5UEHB", "MG5KQC6ZKSVO4A63G2"}
+        self.assertEqual(self._apply(HaveAltFamilies([])), expected)
+
+    def test_incompletenames_matches_expected_handles(self):
+        expected = {
+            "LGMKQCQP5M5L18FVTN", "2LQKQC62GJUQCJIOK8", "B0UKQC9A54F1GUB7NR",
+            "1ENKQCBPFZTAQJSP4O", "3RFKQCNKMX9HVLNSLW", "cc8205d883763f02abd",
+            "IHOKQCECRZYQDKW6KF", "F4UKQCPK572VWU2YZQ", "FHKKQC963NGSY18ZDZ",
+            "I6QKQCFRDTV2LDC8M2", "WIVKQC4Q4FCQJT5M63", "3YTKQCK2W63W0MQBJE",
+            "7IOKQC1NVGUI1E55CQ", "F3UKQC7ZV3EYVWTZ8O", "YRTKQCNDP343OD5OQJ",
+            "2AMKQCE67YOH3TBVYI", "52UKQCFYXMFTKIGNBS", "cc8205d87fd529000ff",
+            "LOUKQC45HUN532HOOM", "BUNKQCO4HZHZP70F3K", "7CXKQC59NSZFXIG1UE",
+            "MWUKQCD2ZSCECQOCLG", "EPXKQCQRZP2PNPN7BE", "7GXKQCMVFU8WR1LKZL",
+            "1MXKQCJ2BR43910ZYX", "LGXKQCJ5OP6MKF9QLN", "7VEKQCV05EDK0625KI",
+            "B1UKQCBR49WB3134PN", "OFXKQC8W0N3N6JP6YQ", "XZLKQCRQA9EHPBNZPT",
+            "cc82060512042f67e2c", "N7XKQCYD3VSCSZREGJ", "LCXKQCQZH5EH56NTCD",
+            "8QXKQCHJ2EUC7OV8EQ", "R6UKQC939L9FV62UGE", "L9LKQCQ8KJRKHM4D2E",
+            "TPXKQCEGL04KHGMO2X", "cc82060516c6c141500", "4UMKQCF07KL2K92CI5",
+            "FRTKQC3G6JBJAR2ZPX", "A4YKQCRYSI5FT5T38", "0PXKQCJ9S1M3NNASET",
+            "P5IKQC88STY3FNTFZ3", "COFKQCUXC2H4G3QBYT", "8HUKQCRV8B3J2LLQ3B",
+            "PIEKQCKUL6OAMS8Q9R", "ZHMKQC50PFVAPI8PZ6", "8HKKQCTEJAOBVH410L",
+            "BNXKQCEBXC1RCOGJNF", "OQXKQC2Y5FVH9PK0JL", "Q42KQCKJZGS4IZWHF5",
+            "cc8205d872f532ab14e", "KSTKQC018GNA7HDCAS", "JKDKQCF4ND92A088J2",
+            "cc8205d887376aacba2", "FZTKQCSTPIQ3C9JC46", "2CUKQCFDVN3EZE2E4C",
+            "0TTKQCXXY59OCDPLV3", "UPWKQCYVFH7RZOSZ29", "cc8206050e541f79f92",
+            "XTUKQC7WCIVA5F0NC4", "AXLKQC0YTFAWQ234YD", "cc8205d87831c772e87",
+            "cc8205d87c20350420b", "W0XKQCKSFWWJWQ2OSN", "T4UKQCYGECXGVNBWMY",
+            "TBXKQC7OHIN28PVCS3", "VAXKQC19HIFPX61J28", "QXXKQC9PT5FWNT140K",
+            "HLQKQC0BJIZL0V4EK4", "R5HKQCIEPOY1DMQOWX", "FQUKQCWEHOAWUP4QWS",
+            "WMXKQCDUJ4JKQQYCR7", "K8XKQCDSVLSK422A3K", "cc82060504445ab6deb",
+            "OIUKQCBHUWDGL7DNTI",
+        }
+        self.assertEqual(self._apply(IncompleteNames([])), expected)
 
     def test_hasnickname_result_is_subset_of_python_result(self):
         # SQL checks primary_name.nick only (approximation); result must be a
@@ -813,6 +851,141 @@ class Tier3TestsMixin:
     def test_nodeathdate_excludes_person_with_dated_death(self):
         result = self._apply(NoDeathdate([]))
         self.assertNotIn(self.h_has_deathdate, result)
+
+
+# ---------------------------------------------------------------------------
+# Tier3PlusTestsMixin
+# ---------------------------------------------------------------------------
+
+
+class Tier3PlusTestsMixin:
+    """
+    Integration tests for HaveAltFamilies and IncompleteNames.
+
+    Subclasses must implement _open_db() returning an empty, open DBAPI db.
+    """
+
+    @classmethod
+    def _open_db(cls):
+        raise NotImplementedError
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = cls._open_db()
+
+        # --- Persons for HaveAltFamilies ---
+        cls.h_adopted_person = _commit(cls.db, Person())
+        cls.h_birth_person = _commit(cls.db, Person())
+        cls.h_no_parent_fam = _commit(cls.db, Person())
+
+        # Family where h_adopted_person has ADOPTED frel
+        fam_adopted = Family()
+        cref_adopted = ChildRef()
+        cref_adopted.ref = cls.h_adopted_person
+        cref_adopted.set_father_relation(ChildRefType(ChildRefType.ADOPTED))
+        fam_adopted.add_child_ref(cref_adopted)
+        cls.h_fam_adopted = _commit(cls.db, fam_adopted)
+
+        # Family where h_birth_person has BIRTH frel/mrel (value=1, not ADOPTED)
+        fam_birth = Family()
+        cref_birth = ChildRef()
+        cref_birth.ref = cls.h_birth_person
+        fam_birth.add_child_ref(cref_birth)
+        cls.h_fam_birth = _commit(cls.db, fam_birth)
+
+        # Link persons to their parent families
+        with DbTxn("test", cls.db) as txn:
+            p_adopted = cls.db.get_person_from_handle(cls.h_adopted_person)
+            p_adopted.add_parent_family_handle(cls.h_fam_adopted)
+            cls.db.commit_person(p_adopted, txn)
+
+            p_birth = cls.db.get_person_from_handle(cls.h_birth_person)
+            p_birth.add_parent_family_handle(cls.h_fam_birth)
+            cls.db.commit_person(p_birth, txn)
+
+        # --- Persons for IncompleteNames ---
+        # Blank primary first_name → matches via SQL
+        p_no_first = Person()
+        p_no_first.primary_name.set_first_name("")
+        sn = Surname()
+        sn.set_surname("Smith")
+        p_no_first.primary_name.add_surname(sn)
+        cls.h_no_first = _commit(cls.db, p_no_first)
+
+        # Blank primary surname → matches via SQL
+        p_blank_surname = Person()
+        p_blank_surname.primary_name.set_first_name("John")
+        sn2 = Surname()
+        sn2.set_surname("")
+        p_blank_surname.primary_name.add_surname(sn2)
+        cls.h_blank_surname = _commit(cls.db, p_blank_surname)
+
+        # Complete primary name but blank alternate name first_name → matches via Python
+        p_alt_incomplete = Person()
+        p_alt_incomplete.primary_name.set_first_name("Alice")
+        sn3 = Surname()
+        sn3.set_surname("Jones")
+        p_alt_incomplete.primary_name.add_surname(sn3)
+        alt_name = Name()
+        alt_name.set_first_name("")
+        sn4 = Surname()
+        sn4.set_surname("Other")
+        alt_name.add_surname(sn4)
+        p_alt_incomplete.add_alternate_name(alt_name)
+        cls.h_alt_incomplete = _commit(cls.db, p_alt_incomplete)
+
+        # Fully complete name → does NOT match
+        p_complete = Person()
+        p_complete.primary_name.set_first_name("Bob")
+        sn5 = Surname()
+        sn5.set_surname("Brown")
+        p_complete.primary_name.add_surname(sn5)
+        cls.h_complete = _commit(cls.db, p_complete)
+
+        register_rules(cls.db)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.db.close()
+
+    def _apply(self, rule):
+        return _apply(self.db, rule)
+
+    # ------------------------------------------------------------------
+    # HaveAltFamilies
+    # ------------------------------------------------------------------
+
+    def test_havealtfamilies_matches_adopted_person(self):
+        result = self._apply(HaveAltFamilies([]))
+        self.assertIn(self.h_adopted_person, result)
+
+    def test_havealtfamilies_excludes_birth_person(self):
+        result = self._apply(HaveAltFamilies([]))
+        self.assertNotIn(self.h_birth_person, result)
+
+    def test_havealtfamilies_excludes_person_with_no_parent_family(self):
+        result = self._apply(HaveAltFamilies([]))
+        self.assertNotIn(self.h_no_parent_fam, result)
+
+    # ------------------------------------------------------------------
+    # IncompleteNames
+    # ------------------------------------------------------------------
+
+    def test_incompletenames_matches_blank_first_name(self):
+        result = self._apply(IncompleteNames([]))
+        self.assertIn(self.h_no_first, result)
+
+    def test_incompletenames_matches_blank_primary_surname(self):
+        result = self._apply(IncompleteNames([]))
+        self.assertIn(self.h_blank_surname, result)
+
+    def test_incompletenames_matches_blank_alternate_name(self):
+        result = self._apply(IncompleteNames([]))
+        self.assertIn(self.h_alt_incomplete, result)
+
+    def test_incompletenames_excludes_complete_name(self):
+        result = self._apply(IncompleteNames([]))
+        self.assertNotIn(self.h_complete, result)
 
 
 # ---------------------------------------------------------------------------
