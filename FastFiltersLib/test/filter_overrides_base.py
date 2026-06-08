@@ -456,17 +456,13 @@ class ExampleDatabaseTestsMixin:
         }
         self.assertEqual(self._apply(IncompleteNames([])), expected)
 
-    def test_hasnickname_result_is_subset_of_python_result(self):
-        # SQL checks primary_name.nick only (approximation); result must be a
-        # subset of the full Python result (no false positives allowed).
-        python_expected = {
+    def test_hasnickname_matches_expected_handles(self):
+        expected = {
             "cc8205d883763f02abd",
             "GNUJQCL9MD64AM56OH",
             "Q8HKQC3VMRM1M6M7ES",
         }
-        result = self._apply(HasNickname([]))
-        self.assertTrue(result.issubset(python_expected))
-        self.assertGreater(len(result), 0)
+        self.assertEqual(self._apply(HasNickname([])), expected)
 
 
 # ---------------------------------------------------------------------------
@@ -920,7 +916,7 @@ class Tier3PlusTestsMixin:
         p_blank_surname.primary_name.add_surname(sn2)
         cls.h_blank_surname = _commit(cls.db, p_blank_surname)
 
-        # Complete primary name but blank alternate name first_name → matches via Python
+        # Complete primary name but blank alternate name first_name → matches via SQL
         p_alt_incomplete = Person()
         p_alt_incomplete.primary_name.set_first_name("Alice")
         sn3 = Surname()

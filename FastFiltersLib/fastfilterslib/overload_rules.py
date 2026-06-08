@@ -77,15 +77,35 @@ class DisconnectedOverride(RuleOverride):
 class HasNicknameOverride(RuleOverride):
     """Fast SQL replacement for person.HasNickname.
 
-    Checks primary_name.nick only.  A person whose only nick lives in an
-    alternate name or in a NICKNAME attribute will be a false negative
-    (very rare in practice).
+    Mirrors the Python rule which checks three sources:
+      1. primary_name.nick
+      2. any alternate name's nick
+      3. any attribute with type.value = 7 (AttributeType.NICKNAME)
     """
+
+    _NICKNAME_TYPE = 7  # AttributeType.NICKNAME
 
     def prepare(self, original, db, user):
         compat = SQLCompat.for_db(db)
-        nick = compat.json_extract("json_data", "primary_name.nick")
-        sql = f"SELECT handle FROM person WHERE TRIM(COALESCE({nick}, '')) != ''"
+        primary_nick = compat.json_extract("json_data", "primary_name.nick")
+        an_from, an_val = compat.json_each_json("json_data", "alternate_names", "an")
+        alt_nick = compat.json_extract(an_val, "nick")
+        al_from, al_val = compat.json_each_json("json_data", "attribute_list", "al")
+        attr_type = compat.json_extract_int(al_val, "type.value")
+        attr_value = compat.json_extract(al_val, "value")
+        sql = f"""
+            SELECT handle FROM person
+            WHERE TRIM(COALESCE({primary_nick}, '')) != ''
+               OR EXISTS (
+                    SELECT 1 FROM {an_from}
+                    WHERE TRIM(COALESCE({alt_nick}, '')) != ''
+                  )
+               OR EXISTS (
+                    SELECT 1 FROM {al_from}
+                    WHERE {attr_type} = {self._NICKNAME_TYPE}
+                      AND TRIM(COALESCE({attr_value}, '')) != ''
+                  )
+        """
         self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
@@ -339,47 +359,47 @@ class HaveAltFamiliesOverride(RuleOverride):
 
 
 class IncompleteNamesOverride(RuleOverride):
-    """SQL + Python hybrid replacement for person.IncompleteNames.
+    """Pure SQL replacement for person.IncompleteNames.
 
-    SQL pre-selects persons with an incomplete primary name (blank first_name,
-    empty surname_list, or a blank surname entry).  Python post-checks alternate
-    names for the remaining persons, since those are very rarely incomplete and
-    nested SQL over alternate_names → surname_list would be expensive.
+    A single query covers both the primary name and every alternate name:
+    blank first_name, empty surname_list, or a blank surname entry in either.
     """
 
     def prepare(self, original, db, user):
         compat = SQLCompat.for_db(db)
-        first = compat.json_extract("json_data", "primary_name.first_name")
-        slist_len = compat.json_array_length("json_data", "primary_name.surname_list")
-        sn_from, sn_val = compat.json_each_json(
-            "json_data", "primary_name.surname_list", "sn"
+        pn_first = compat.json_extract("json_data", "primary_name.first_name")
+        pn_slist_len = compat.json_array_length("json_data", "primary_name.surname_list")
+        pn_sn_from, pn_sn_val = compat.json_each_json(
+            "json_data", "primary_name.surname_list", "pn_sn"
         )
-        surname = compat.json_extract(sn_val, "surname")
+        pn_surname = compat.json_extract(pn_sn_val, "surname")
+        an_from, an_val = compat.json_each_json("json_data", "alternate_names", "an")
+        an_first = compat.json_extract(an_val, "first_name")
+        an_slist_len = compat.json_array_length(an_val, "surname_list")
+        an_sn_from, an_sn_val = compat.json_each_json(an_val, "surname_list", "an_sn")
+        an_surname = compat.json_extract(an_sn_val, "surname")
         sql = f"""
             SELECT handle FROM person
-            WHERE TRIM(COALESCE({first}, '')) = ''
-               OR {slist_len} = 0
+            WHERE TRIM(COALESCE({pn_first}, '')) = ''
+               OR {pn_slist_len} = 0
                OR EXISTS (
-                    SELECT 1
-                    FROM {sn_from}
-                    WHERE TRIM(COALESCE({surname}, '')) = ''
+                    SELECT 1 FROM {pn_sn_from}
+                    WHERE TRIM(COALESCE({pn_surname}, '')) = ''
+                  )
+               OR EXISTS (
+                    SELECT 1 FROM {an_from}
+                    WHERE TRIM(COALESCE({an_first}, '')) = ''
+                       OR {an_slist_len} = 0
+                       OR EXISTS (
+                            SELECT 1 FROM {an_sn_from}
+                            WHERE TRIM(COALESCE({an_surname}, '')) = ''
+                          )
                   )
         """
-        self.handles = _fetch_handles(db, sql)
+        self.rule.selected_handles = _fetch_handles(db, sql)
 
     def apply_to_one(self, original, db, person):
-        if person.handle in self.handles:
-            return True
-        for name in person.alternate_names:
-            if name.first_name.strip() == "":
-                return True
-            if name.surname_list:
-                for surn in name.surname_list:
-                    if surn.surname.strip() == "":
-                        return True
-            else:
-                return True
-        return False
+        return person.handle in self.rule.selected_handles
 
 
 # ---------------------------------------------------------------------------
